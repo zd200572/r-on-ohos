@@ -9,6 +9,10 @@
 
 ---
 
+## 截图
+
+![R on HarmonyOS REPL](docs/screenshot.png)
+
 ## 概述
 
 本项目实现了 R 语言运行时在鸿蒙系统上的完整移植链路：
