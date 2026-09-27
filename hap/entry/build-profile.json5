@@ -1,0 +1,18 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    "externalNativeOptions": {
+      "path": "./src/main/cpp/CMakeLists.txt",
+      "arguments": "",
+      "cppFlags": "",
+      "abiFilters": ["arm64-v8a", "x86_64"]   // arm64=真机/鸿蒙PC, x86_64=PC模拟器
+    }
+  },
+  "buildOptionSet": [
+    {
+      "name": "release",
+      "arkOptions": { "obfuscation": { "ruleOptions": { "enable": false } } }
+    }
+  ],
+  "targets": [ { "name": "default" } ]
+}

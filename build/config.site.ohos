@@ -1,0 +1,74 @@
+# ============ R configure 的交叉编译缓存（config.site）============
+# 交叉编译时无法运行目标平台测试程序，凡 configure 卡住的位置都要在这里固化结果。
+# 首轮构建流程：报错 → 在 R 源码 configure 里 grep 对应 checking 句子找到变量名 →
+# 追加到这里 → 重跑 30-build-r.sh。以下为 aarch64 musl 的保守预置值。
+
+# ---- 通用 autotools 探测（musl 均满足）----
+ac_cv_c_bigendian=no
+ac_cv_func_alloca_works=yes
+ac_cv_working_alloca_h=yes
+ac_cv_func_mmap_fixed_mapped=yes
+ac_cv_func_memcmp_working=yes
+ac_cv_func_setpgrp_void=yes
+ac_cv_func_fork_works=yes
+ac_cv_func_vfork_works=yes
+ac_cv_func_chown_works=yes
+ac_cv_func_printf_unix00=yes
+ac_cv_func_snprintf_ret_type=int          # snprintf 返回 int
+ac_cv_have_decl_snprintf=yes
+ac_cv_type_signal=void
+
+# ---- 常见函数存在性（musl libc）----
+ac_cv_func_copysign=yes
+ac_cv_func_dladdr=yes
+ac_cv_func_dlsym=yes
+ac_cv_func_getaddrinfo=yes
+ac_cv_func_getrlimit=yes
+ac_cv_func_madvise=yes
+ac_cv_func_mprotect=yes
+ac_cv_func_fallocate=yes
+ac_cv_func_seekdir=yes
+ac_cv_func_telldir=yes
+ac_cv_func_ftime=no                       # musl 无 ftime
+ac_cv_func_sigaltstack=yes
+ac_cv_func_sigaction=yes
+ac_cv_func_sysconf=yes
+ac_cv_func_times=yes
+ac_cv_func_utimes=yes
+ac_cv_func_waitpid=yes
+
+# ---- R 自有探测（r_cv_*；与 Termux/Android 移植经验一致）----
+# 栈向下生长（aarch64/linux）
+r_cv_stack_direction=down
+# zlib 版本 >= 1.2.5（交叉编译无法运行测试程序，链 A 编的是 zlib 1.3.1）
+r_cv_header_zlib_h=yes
+# bzip2 版本 >= 1.0.6（链 A 编的是 bzip2 1.0.8）
+r_cv_have_bzlib=yes
+# pcre2 UTF 支持（链 A 编的 pcre2 默认启用 UTF）
+r_cv_have_pcre2utf=yes
+# libcurl >= 7.28（链 A 编的 curl 8.10.1）
+r_cv_have_curl728=yes
+# libcurl HTTPS 支持（链 A 编的 curl 带 openssl）
+r_cv_have_curl_https=yes
+# lzma 版本 >= 5.0.3（链 A 编的是 xz 5.8.4）
+r_cv_have_lzma=yes
+# OpenBLAS 的 zdotu 实现是标准的（交叉编译无法运行测试程序，需手动确认）
+r_cv_zdotu_is_usable=yes
+# SIZE_MAX 在 stdint.h 中定义（musl libc 提供）
+r_cv_size_max=yes
+# musl libc 的函数实现均正确（交叉编译无法运行测试程序）
+r_cv_func_log1p_works=yes
+r_cv_func_calloc_works=yes
+r_cv_func_isfinite_works=yes
+r_cv_func_ctanh_works=yes
+r_cv_func_sigaction_works=yes
+r_cv_working_ftell=yes
+r_cv_working_mktime=yes
+r_cv_working_mktime1=yes
+r_cv_working_mktime2=yes
+r_cv_working_mktime3=yes
+r_cv_mktime_errno=yes
+r_cv_putenv_unset=yes
+r_cv_putenv_unset2=yes
+r_cv_enum_type=yes
+# 若首轮报出其他 r_cv_* 缺失，按提示在此追加（详见 docs/03 调试清单）

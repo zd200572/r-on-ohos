@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# ============ 伪 Fortran 编译器：f2c 转 C → 指定 C 编译器编译 ============
+# R 官方认可的做法（R-admin B.6 / R 源码 scripts/f77_f2c）：
+# 把每个 .f 文件用 f2c 翻译成 C，再用 $F77_CC 编译；链接阶段追加 libf2c。
+# 注意：必须用 F77_CC 而不是 CC —— configure 内嵌的 libtool 在 FC 测试时会把
+# 环境里的 CC 设成 $FC（即本脚本），用 CC 会导致无限递归（实测踩坑）。
+set -e
+F2C="${F2C_BIN:-/usr/bin/f2c}"
+[ -n "${F77_CC:-}" ] || { echo "f77: F77_CC 未设置（host=gcc / 目标=ohos clang，见 env.sh）" >&2; exit 1; }
+[ -x "$(command -v ${F2C})" ] || { echo "f77: 找不到 f2c（$F2C），先跑 20-f2c.sh" >&2; exit 1; }
+DEPS_PREFIX="${DEPS_PREFIX:-$(cd "$(dirname "$0")" && echo build/out/deps)}"
+
+tmpd="$(mktemp -d /tmp/f2c-XXXXXX)"
+trap 'rm -rf "$tmpd"' EXIT
+newargs=(); saw_c=0
+
+for a in "$@"; do
+  case "$a" in
+    *.f90|*.f95)
+      b="$(basename "$a")"; b="${b%.*}"
+      # 自由格式 Fortran：f2c -9 处理自由格式语法
+      "$F2C" -9 -a -R -w -w66 -Nx2000 "$a" >/dev/null </dev/null || { echo "f77: f2c 转换 $a 失败" >&2; exit 1; }
+      [ -f "${b}.c" ] || { echo "f77: f2c 未生成 ${b}.c（输入 $a）" >&2; exit 1; }
+      mv -f "${b}.c" "$tmpd/${b}.c"
+      newargs+=("$tmpd/${b}.c") ;;
+    *.f|*.for|*.F)
+      b="$(basename "$a")"; b="${b%.*}"
+      # -a: ANSI 声明; -R: REAL 运算不提升为 DOUBLE（与 gfortran 语义一致）; -w/-w66: 静默警告
+      # </dev/null: f2c 在异常情况下会等待 stdin，configure 环境里会挂死，必须掐断
+      # stderr 保留（f2c 报错要走 make 日志，吞掉就没法调试）
+      "$F2C" -a -R -w -w66 -Nx2000 "$a" >/dev/null </dev/null || { echo "f77: f2c 转换 $a 失败" >&2; exit 1; }
+      [ -f "${b}.c" ] || { echo "f77: f2c 未生成 ${b}.c（输入 $a）" >&2; exit 1; }
+      mv -f "${b}.c" "$tmpd/${b}.c"
+      newargs+=("$tmpd/${b}.c") ;;
+    -c) saw_c=1; newargs+=("$a") ;;
+    *)  newargs+=("$a") ;;
+  esac
+done
+
+# 链接阶段补 f2c 运行库（纯 C，已由 20-f2c.sh 交叉编译）
+[ $saw_c -eq 1 ] || newargs+=(-lf2c -lm)
+exec $F77_CC -I"$DEPS_PREFIX/include" -L"$DEPS_PREFIX/lib" "${newargs[@]}" </dev/null

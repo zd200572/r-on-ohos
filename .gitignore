@@ -1,0 +1,16 @@
+# 交叉编译产物
+build/out/
+build/downloads/
+
+# 由 40-pack.sh 拷入 HAP 的 R 运行时（重新生成，不入库）
+hap/entry/src/main/resources/rawfile/rhome.tar
+hap/entry/libs/*/*.so
+
+# DevEco / hvigor
+hap/.idea/
+hap/.hvigor/
+hap/oh_modules/
+hap/build/
+hap/entry/build/
+hap/local.properties
+entry-default-unsigned.hap

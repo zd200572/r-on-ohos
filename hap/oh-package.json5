@@ -1,0 +1,8 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "ronohos",
+  "version": "1.0.0",
+  "description": "R language runtime on HarmonyOS PC",
+  "dependencies": {},
+  "devDependencies": {}
+}

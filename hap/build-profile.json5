@@ -1,0 +1,23 @@
+{
+  "app": {
+    "signingConfigs": [],   // DevEco 自动调试签名即可；发布签名自己配
+    "products": [
+      {
+        "name": "default",
+        "compatibleSdkVersion": "6.0.0(20)",  // 若与你本机 SDK 不符，按 DevEco 提示改（如 5.1.1(18)）
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": { "caseSensitiveCheck": true, "useNormalizedOHMUrl": true }
+        }
+      }
+    ],
+    "buildModeSet": [ { "name": "debug" }, { "name": "release" } ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [ { "name": "default", "applyToProducts": [ "default" ] } ]
+    }
+  ]
+}

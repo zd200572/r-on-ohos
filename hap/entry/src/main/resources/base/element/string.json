@@ -1,0 +1,7 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "R 语言运行时（移植自 CRAN R）" },
+    { "name": "EntryAbility_desc", "value": "R Console" },
+    { "name": "EntryAbility_label", "value": "R Console" }
+  ]
+}
