@@ -30,8 +30,9 @@
 │  │  ┌─────────────────────────────────────────────┐  │  │
 │  │  │  > 1 + 1                                    │  │  │
 │  │  │  [1] 2                                      │  │  │
-│  │  │  > mean(c(1,2,3,4,5))                       │  │  │
-│  │  │  [1] 3                                      │  │  │
+│  │  │  > library(stats)                           │  │  │
+│  │  │  > sd(rnorm(10))                            │  │  │
+│  │  │  [1] 0.9680378                              │  │  │
 │  │  └─────────────────────────────────────────────┘  │  │
 │  │  菜单栏: 文件 | 编辑 | 包 | 设置 | 帮助            │  │
 │  └──────────────────────┬────────────────────────────┘  │
@@ -56,6 +57,9 @@
 | R 4.5.1 交叉编译 | ✅ | x86_64（模拟器）完整；aarch64（真机）构建链已打通 |
 | REPL 基础交互 | ✅ | `1+1 → [1] 2`、变量赋值、算术运算、向量操作 |
 | 嵌入式 R 引擎 | ✅ | dlopen libR.so + Rf_initEmbeddedR + R_ReplDLLdo1 循环 |
+| 核心包加载 | ✅ | 9 个包 .so 预加载（stats/parallel/tools/grid/utils/splines/methods/grDevices/graphics） |
+| stats 统计函数 | ✅ | `library(stats)` + `sd(rnorm(10)) = 0.968` + `date()` 等正常工作 |
+| plot() 绘图 | ✅ | `plot(2,2)` 成功执行（graphics/grDevices 包已加载） |
 | 菜单栏 | ✅ | 文件（运行脚本）/ 编辑 / 包（安装包）/ 设置 / 帮助 |
 | 运行脚本 | ✅ | DocumentViewPicker 选文件 → source() 执行 |
 | 安装包弹窗 | ✅ | 输入包名 → install.packages() |
@@ -66,8 +70,7 @@
 
 | 限制 | 根因 | 影响 |
 |------|------|------|
-| `source()` / `library()` 加载包 .so 失败 | musl dlopen 解析 NEEDED 走文件系统搜索，不复用已加载库；SONAME + RUNPATH 补丁均未解决 | stats/tools/utils 等包的编译型函数不可用 |
-| `plot()` 绘图 | 依赖 graphics.so/grDevices.so（同上） | 绘图功能不可用 |
+| `system()` / `popen()` 不可用 | 鸿蒙 app 沙箱无 `/bin/sh`，`popen` 返回 EINVAL | 已通过覆盖 `Sys.which` 绕过；直接调 `system()` 的 R 代码仍不可用 |
 | `q()` 退出可能崩溃 | R_CleanUp → exit(0) 被 appspawn 拦截为 SIGABRT | 退出应用时可能闪退 |
 | CRAN 包安装编译 | 沙箱禁止 execv（EACCES） | install.packages() 编译型包不可用 |
 | Tab 补全 / 历史记录 | 未实现 | 计划中 |
@@ -101,7 +104,13 @@ hap/
 │       │   ├── pages/Index.ets      ArkUI 终端页
 │       │   └── libentry.so.d.ts     native 模块类型声明
 │       └── resources/
-│           └── rawfile/rhome.tar    R 运行时（~52MB，构建时生成）
+│           └── rawfile/rhome.tar    R 运行时（~60MB，构建时生成）
+│   └── libs/x86_64/
+│       ├── libR.so                  R 引擎（含 Rdynload patch）
+│       ├── libomp.so                OpenMP 运行时
+│       └── R/                       核心包 .so（可执行挂载点）
+│           ├── library/{stats,utils,...}/libs/*.so
+│           └── modules/{internet,lapack}.so
 └── build-profile.json5             SDK 6.0.0(20) / 6.1.1(24)
 ```
 
@@ -117,6 +126,8 @@ hap/
 | Node-API threadsafe function bug | 改用轮询机制（mutex + setInterval pollOutput） |
 | exit() 被 appspawn 拦截 | sigsetjmp/siglongjmp + signal(SIGABRT) 拦截 |
 | stub libz.so | 删除 SDK 的 stub libz.so，让 linker 找设备上的真 libz.so |
+| app-data 目录 noexec | 包 .so 放 HAP libs 可执行挂载点 + patch Rdynload.c remapDLLPath |
+| `system()` EINVAL（无 /bin/sh） | R 初始化后用 C API 覆盖 `Sys.which` 返回空字符串 |
 
 ## 快速开始
 
@@ -237,9 +248,10 @@ r-on-ohos/
 - [x] R 4.5.1 交叉编译（x86_64 + aarch64）
 - [x] HAP 应用 REPL 交互（`1+1 → [1] 2`）
 - [x] 菜单栏 + 运行脚本 + 安装包弹窗
-- [ ] **包 .so 加载**（stats/tools/utils 等编译型包）
-- [ ] `source()` 完整可用
-- [ ] `plot()` 绘图（需适配 OHOS 图形输出设备）
+- [x] **核心包 .so 加载**（stats/tools/utils 等 9 个包，remapDLLPath + 预加载）
+- [x] **stats 统计函数**（`sd(rnorm(10)) = 0.968`，`date()` 等）
+- [x] **plot() 绘图**（`plot(2,2)` 成功执行）
+- [ ] `source()` 完整可用（基础 source 已工作，外部脚本路径待验证）
 - [ ] Tab 键补全
 - [ ] 上下键输入历史
 - [ ] aarch64 真机验证
