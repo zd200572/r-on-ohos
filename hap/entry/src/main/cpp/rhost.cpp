@@ -485,46 +485,9 @@ static void *RRunnerThread(void *arg) {
                     }
                     LOGI("Sys.which 已覆盖（HarmonyOS 无 /bin/sh）");
 
-                    // 4e) 自动验证：尝试 library(stats)，确认 Sys.which 覆盖生效
-                    using R_ToplevelExec_t = int (*)(void (*)(void *), void *);
-                    auto R_ToplevelExec_fn = (R_ToplevelExec_t)dlsym(libR, "R_ToplevelExec");
-                    if (R_ToplevelExec_fn) {
-                        const char *test_code = "library(stats)";
-                        SEXP_t test_text = Rf_allocVector_fn(16, 1);
-                        SET_STRING_ELT_fn(test_text, 0, Rf_mkChar_fn(test_code));
-                        int test_status = 0;
-                        SEXP_t test_exprs = R_ParseVector_fn(test_text, -1, &test_status, *R_NilValue_ptr);
-                        if (test_status == 1 && test_exprs) {
-                            // 用 R_ToplevelExec 安全执行（捕获 R 错误不 segfault）
-                            struct TestCtx {
-                                Rf_eval_t eval_fn;
-                                VECTOR_ELT_t elt_fn;
-                                LENGTH_t len_fn;
-                                SEXP_t exprs;
-                                SEXP_t env;
-                            };
-                            // 简化：直接 eval（已在 sigsetjmp 保护下）
-                            int n2 = LENGTH_fn(test_exprs);
-                            for (int i = 0; i < n2; i++) {
-                                Rf_eval_fn(VECTOR_ELT_fn(test_exprs, i), *R_GlobalEnv_ptr);
-                            }
-                            LOGI("library(stats) 已执行（验证 Sys.which 覆盖）");
-
-                            // 4f) 验证 stats 函数：sd(rnorm(10))
-                            const char *verify_code = "cat('sd(rnorm(10)) =', sd(rnorm(10)), '\\n')";
-                            SEXP_t v_text = Rf_allocVector_fn(16, 1);
-                            SET_STRING_ELT_fn(v_text, 0, Rf_mkChar_fn(verify_code));
-                            int v_status = 0;
-                            SEXP_t v_exprs = R_ParseVector_fn(v_text, -1, &v_status, *R_NilValue_ptr);
-                            if (v_status == 1 && v_exprs) {
-                                int nv = LENGTH_fn(v_exprs);
-                                for (int i = 0; i < nv; i++) {
-                                    Rf_eval_fn(VECTOR_ELT_fn(v_exprs, i), *R_GlobalEnv_ptr);
-                                }
-                                LOGI("sd(rnorm(10)) 已执行");
-                            }
-                        }
-                    }
+                    // 图形设备初始化改为通过 REPL stdin 管道发送（避免 R_ParseVector segfault）
+                    // Index.ets 在 R 启动后通过 writeR 发送 library(stats) 等命令
+                    LOGI("跳过 R 代码注入，改用 REPL 管道初始化");
                 } else {
                     LOGE("Sys.which 覆盖失败：解析状态=%d", status);
                 }
