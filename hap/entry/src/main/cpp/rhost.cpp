@@ -260,6 +260,22 @@ static void *RRunnerThread(void *arg) {
     setenv("R_DEFAULT_PACKAGES", "base", 1);
     setenv("R_MAX_VSIZE", "512M", 1);
     setenv("R_NSIZE", "200000", 1);
+    // R 原生库根（可执行挂载点）：包 .so / 模块 .so 位于 nativeLibDir/R/ 下。
+    // HarmonyOS app-data 挂载 noexec，dlopen 拒绝从数据目录加载共享库；
+    // 补丁版 Rdynload.c 的 remapDLLPath 在 R_HOME 路径 dlopen 失败时按此
+    // 前缀重映射（R_HOME/library/... → R_NATIVE_LIBRARY_ROOT/library/...），
+    // R_moduleCdynload / R_cairoCdynload 也改用 nativeLibraryRoot()。
+    if (!a->nativeLibDir.empty())
+        setenv("R_NATIVE_LIBRARY_ROOT", (a->nativeLibDir + "/R").c_str(), 1);
+    // 参照 RStudio-ohos：显式指定 R 目录与禁用字节码/JIT 编译，
+    // 避免启动期触发 native 模块探测与 lazy-load 编译。
+    setenv("R_LIBS_SITE",       (a->rHome + "/library").c_str(), 1);
+    setenv("R_SHARE_DIR",       (a->rHome + "/share").c_str(),   1);
+    setenv("R_INCLUDE_DIR",     (a->rHome + "/include").c_str(), 1);
+    setenv("R_DOC_DIR",         (a->rHome + "/doc").c_str(),     1);
+    setenv("R_ENABLE_JIT",      "0", 1);
+    setenv("R_DISABLE_BYTECODE","1", 1);
+    setenv("_R_COMPILE_PKGS_",  "0", 1);
 
     // 3) 按依赖顺序预加载 libR 的非系统依赖，再加载 libR.so
     //    注意：不预加载 libz.so——SDK 的 libz.so 是 stub，
@@ -419,13 +435,117 @@ static void *RRunnerThread(void *arg) {
         if (ptr_R_ClearerrConsole_sym) *ptr_R_ClearerrConsole_sym = []() -> void {};
         LOGI("所有 R 回调已设置");
 
-        // 预加载所有包的 .so（musl dlopen 搜索路径问题，需显式预加载）
+        // 4d) 覆盖 base::Sys.which —— HarmonyOS 无 /bin/sh，system() 会 EINVAL
+        //     Rf_initEmbeddedR 后 base namespace 已就绪，用 C API 注入 R 代码
+        {
+            using SEXP_t = void *;
+            using Rf_allocVector_t = SEXP_t (*)(int, int);
+            using SET_STRING_ELT_t = void (*)(SEXP_t, int, SEXP_t);
+            using Rf_mkChar_t = SEXP_t (*)(const char *);
+            using R_ParseVector_t = SEXP_t (*)(SEXP_t, int, int *, SEXP_t);
+            using Rf_eval_t = SEXP_t (*)(SEXP_t, SEXP_t);
+            using LENGTH_t = int (*)(SEXP_t);
+            using VECTOR_ELT_t = SEXP_t (*)(SEXP_t, int);
+
+            auto Rf_allocVector_fn = (Rf_allocVector_t)dlsym(libR, "Rf_allocVector");
+            auto SET_STRING_ELT_fn = (SET_STRING_ELT_t)dlsym(libR, "SET_STRING_ELT");
+            auto Rf_mkChar_fn = (Rf_mkChar_t)dlsym(libR, "Rf_mkChar");
+            auto R_ParseVector_fn = (R_ParseVector_t)dlsym(libR, "R_ParseVector");
+            auto Rf_eval_fn = (Rf_eval_t)dlsym(libR, "Rf_eval");
+            auto LENGTH_fn = (LENGTH_t)dlsym(libR, "LENGTH");
+            auto VECTOR_ELT_fn = (VECTOR_ELT_t)dlsym(libR, "VECTOR_ELT");
+            auto R_GlobalEnv_ptr = (SEXP_t *)dlsym(libR, "R_GlobalEnv");
+            auto R_NilValue_ptr = (SEXP_t *)dlsym(libR, "R_NilValue");
+
+            if (Rf_allocVector_fn && SET_STRING_ELT_fn && Rf_mkChar_fn &&
+                R_ParseVector_fn && Rf_eval_fn && LENGTH_fn && VECTOR_ELT_fn &&
+                R_GlobalEnv_ptr && R_NilValue_ptr) {
+
+                // R 代码：覆盖 Sys.which 返回空字符串
+                // assignInNamespace 在 utils 包中（未加载），改用 unlockBinding+assign
+                const char *r_code =
+                    "unlockBinding('Sys.which', baseenv());"
+                    "assign('Sys.which', function(names) {"
+                    "  res <- character(length(names)); names(res) <- names; res"
+                    "}, envir=baseenv());"
+                    "lockBinding('Sys.which', baseenv())";
+
+                // 创建字符向量（STRSXP = 16）
+                SEXP_t text = Rf_allocVector_fn(16, 1);
+                SET_STRING_ELT_fn(text, 0, Rf_mkChar_fn(r_code));
+
+                // 解析并执行
+                int status = 0;
+                SEXP_t exprs = R_ParseVector_fn(text, -1, &status, *R_NilValue_ptr);
+
+                if (status == 1 && exprs) {  // PARSE_OK = 1
+                    int n = LENGTH_fn(exprs);
+                    for (int i = 0; i < n; i++) {
+                        Rf_eval_fn(VECTOR_ELT_fn(exprs, i), *R_GlobalEnv_ptr);
+                    }
+                    LOGI("Sys.which 已覆盖（HarmonyOS 无 /bin/sh）");
+
+                    // 4e) 自动验证：尝试 library(stats)，确认 Sys.which 覆盖生效
+                    using R_ToplevelExec_t = int (*)(void (*)(void *), void *);
+                    auto R_ToplevelExec_fn = (R_ToplevelExec_t)dlsym(libR, "R_ToplevelExec");
+                    if (R_ToplevelExec_fn) {
+                        const char *test_code = "library(stats)";
+                        SEXP_t test_text = Rf_allocVector_fn(16, 1);
+                        SET_STRING_ELT_fn(test_text, 0, Rf_mkChar_fn(test_code));
+                        int test_status = 0;
+                        SEXP_t test_exprs = R_ParseVector_fn(test_text, -1, &test_status, *R_NilValue_ptr);
+                        if (test_status == 1 && test_exprs) {
+                            // 用 R_ToplevelExec 安全执行（捕获 R 错误不 segfault）
+                            struct TestCtx {
+                                Rf_eval_t eval_fn;
+                                VECTOR_ELT_t elt_fn;
+                                LENGTH_t len_fn;
+                                SEXP_t exprs;
+                                SEXP_t env;
+                            };
+                            // 简化：直接 eval（已在 sigsetjmp 保护下）
+                            int n2 = LENGTH_fn(test_exprs);
+                            for (int i = 0; i < n2; i++) {
+                                Rf_eval_fn(VECTOR_ELT_fn(test_exprs, i), *R_GlobalEnv_ptr);
+                            }
+                            LOGI("library(stats) 已执行（验证 Sys.which 覆盖）");
+
+                            // 4f) 验证 stats 函数：sd(rnorm(10))
+                            const char *verify_code = "cat('sd(rnorm(10)) =', sd(rnorm(10)), '\\n')";
+                            SEXP_t v_text = Rf_allocVector_fn(16, 1);
+                            SET_STRING_ELT_fn(v_text, 0, Rf_mkChar_fn(verify_code));
+                            int v_status = 0;
+                            SEXP_t v_exprs = R_ParseVector_fn(v_text, -1, &v_status, *R_NilValue_ptr);
+                            if (v_status == 1 && v_exprs) {
+                                int nv = LENGTH_fn(v_exprs);
+                                for (int i = 0; i < nv; i++) {
+                                    Rf_eval_fn(VECTOR_ELT_fn(v_exprs, i), *R_GlobalEnv_ptr);
+                                }
+                                LOGI("sd(rnorm(10)) 已执行");
+                            }
+                        }
+                    }
+                } else {
+                    LOGE("Sys.which 覆盖失败：解析状态=%d", status);
+                }
+            } else {
+                LOGE("无法获取 R C API 符号，Sys.which 未覆盖");
+            }
+        }
+
+        // 预加载所有包的 .so。必须从 R_NATIVE_LIBRARY_ROOT（nativeLibDir/R，
+        // 可执行挂载点）加载——app-data 目录 noexec，dlopen 从数据目录加载会被拒。
+        // 预加载后 musl 以基本名注册这些 .so；R 内部 dyn.load 走
+        // remapDLLPath 重映射路径再次 dlopen 同一路径，返回已加载句柄。
         {
             void *testH = dlopen("libR.so", RTLD_NOW);
             if (testH) LOGI("dlopen libR.so (基本名) 成功");
             else LOGE("dlopen libR.so (基本名) 失败: %{public}s", dlerror());
 
-            std::string libRoot = a->rHome + "/library";
+            std::string nativeRoot = a->nativeLibDir.empty() ? "" : a->nativeLibDir + "/R";
+            std::string libRoot = nativeRoot.empty() ? (a->rHome + "/library")
+                                                     : (nativeRoot + "/library");
+            LOGI("包 .so 预加载目录(可执行): %{public}s", libRoot.c_str());
             DIR *libDir = opendir(libRoot.c_str());
             if (libDir) {
                 struct dirent *pkg;
