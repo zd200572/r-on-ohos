@@ -256,6 +256,31 @@ r-on-ohos/
 - [ ] 上下键输入历史
 - [ ] aarch64 真机验证
 
+## 参考项目
+
+### [ohos_rstudio](https://atomgit.com/OpenHarmonyPCDeveloper/ohos_rstudio) — R + Qt for OpenHarmony
+
+本项目在包 .so 加载方案上参考了 ohos_rstudio（R 4.6.1 + Qt for OpenHarmony）的以下关键技术：
+
+| 技术点 | ohos_rstudio 方案 | 本项目采纳情况 |
+|--------|-------------------|----------------|
+| **Rdynload.c patch** | 添加 `remapDLLPath()` — dlopen 从 R_HOME（app-data noexec）失败时重映射到 `R_NATIVE_LIBRARY_ROOT`（HAP 原生库目录，可执行） | ✅ 采纳，通过 `patch-rdynload.py` 在编译前 patch R 源码 |
+| **main.c patch** | `__OHOS__` 宏禁用 JIT bootstrap（`R_jit_enabled = 0`） | ✅ 采纳 |
+| **包 .so 放置位置** | HAP 原生库目录 `libs/<abi>/R/library/`（可执行挂载点），非 app-data | ✅ 采纳，通过 CMake `copy_directory` 打包进 HAP |
+| **R_NATIVE_LIBRARY_ROOT** | 环境变量指向原生库目录的 R 树 | ✅ 采纳 |
+| **预加载策略** | `RTLD_LAZY \| RTLD_GLOBAL` 预加载所有依赖 .so | ✅ 采纳 |
+| **JIT/字节码禁用** | `R_ENABLE_JIT=0`、`R_DISABLE_BYTECODE=1`、`_R_COMPILE_PKGS_=0` | ✅ 采纳 |
+
+### 本项目独立解决的部分
+
+| 问题 | 方案 |
+|------|------|
+| `system()` EINVAL（app 沙箱无 `/bin/sh`） | R 初始化后用 R C API（`R_ParseVector` + `Rf_eval`）注入 `unlockBinding` + `assign` 覆盖 `Sys.which` 返回空字符串 |
+| `assignInNamespace` 不可用 | `R_DEFAULT_PACKAGES=base` 时 utils 包未加载，改用 base 自带 `unlockBinding` + `assign` + `lockBinding` |
+| Node-API threadsafe function bug | 改用轮询机制（`std::mutex` + `setInterval pollOutput`） |
+| `Rf_mainloop` 定时器 segfault | 用 `R_ReplDLLinit` + `R_ReplDLLdo1` 循环替代 |
+| stub libz.so | 删除 SDK stub，让 linker 找设备真 libz.so |
+
 ## 许可证
 
 R 以 **GPL-2/GPL-3** 发布。二次分发请保留许可证与源码获取途径。
