@@ -111,10 +111,87 @@ struct Index {
   }
 
   private submit(): void {
-    const line = this.input;
+    const line: string = this.input;
     this.input = '';
     this.output += `> ${line}\n`;
-    writeR(line);
+
+    // 检测绘图命令：plot(...) / barplot(...) / hist(...) 等
+    const trimmed: string = line.trim();
+    const plotFns: string[] = ['plot(', 'barplot(', 'hist(', 'boxplot(', 'pie(', 'matplot('];
+    let isPlot: boolean = false;
+    let plotFn: string = '';
+    for (const fn of plotFns) {
+      if (trimmed.startsWith(fn) || trimmed.includes(' ' + fn)) {
+        isPlot = true;
+        plotFn = fn.replace('(', '');
+        break;
+      }
+    }
+
+    if (isPlot) {
+      // 绘图命令：自动包装 PDF 设备 → graphics::plot → dev.off → 弹预览
+      this.submitPlot(line, plotFn);
+    } else {
+      writeR(line);
+    }
+  }
+
+  // 绘图命令处理：自动包装 PDF 设备 + 显示预览
+  private async submitPlot(line: string, fnName: string): Promise<void> {
+    // 把 plot( 替换为 graphics::plot( ，其他绘图函数同理
+    const nsFn: string = fnName === 'plot' ? 'graphics::plot' :
+                         fnName === 'barplot' ? 'graphics::barplot' :
+                         fnName === 'hist' ? 'graphics::hist' :
+                         fnName === 'boxplot' ? 'graphics::boxplot' :
+                         fnName === 'pie' ? 'graphics::pie' :
+                         fnName === 'matplot' ? 'graphics::matplot' : fnName;
+    const rCmd: string = line.replace(fnName + '(', nsFn + '(');
+
+    // 发送给 R：PDF 设备 → 绘图命令 → dev.off
+    writeR("grDevices::pdf('last_plot.pdf')");
+    this.output += `> grDevices::pdf('last_plot.pdf')\n`;
+    setTimeout(() => {
+      writeR(rCmd);
+      this.output += `> ${rCmd}\n`;
+    }, 300);
+    setTimeout(() => {
+      writeR("grDevices::dev.off()");
+      this.output += `> grDevices::dev.off()\n`;
+    }, 600);
+
+    // 等待 R 生成 PDF 后读取并显示
+    setTimeout(() => { this.showPlotPreview(); }, 2500);
+  }
+
+  // 读取 last_plot.pdf 并在 Web 组件中显示
+  private async showPlotPreview(): Promise<void> {
+    try {
+      const pdfPath: string = `${this.ctx.filesDir}/rdata/work/last_plot.pdf`;
+      const file = fs.openSync(pdfPath, fs.OpenMode.READ_ONLY);
+      const stat = fs.statSync(file.fd);
+      const buf = new ArrayBuffer(stat.size);
+      fs.readSync(file.fd, buf);
+      fs.closeSync(file);
+
+      const base64: string = base64Encode(buf);
+      hilog.info(0x0000, TAG, 'PDF 大小: %{public}d, base64 长度: %{public}d', stat.size, base64.length);
+
+      const html: string = `<html><head><style>body{margin:0;padding:0}embed{width:100%;height:100vh}</style></head><body><embed src="data:application/pdf;base64,${base64}" type="application/pdf"></body></html>`;
+      this.plotReady = true;
+      this.showPlot = true;
+      this.output += `[图形预览：PDF ${stat.size} 字节]\n`;
+      this.scroller.scrollEdge(Edge.Bottom);
+      setTimeout(() => {
+        try {
+          this.webController.loadData(html, 'text/html', 'utf-8', '', '');
+        } catch (e2) {
+          hilog.error(0x0000, TAG, 'loadData 失败: %{public}s', String(e2));
+        }
+      }, 500);
+    } catch (e) {
+      hilog.error(0x0000, TAG, 'showPlotPreview 失败: %{public}s', String(e));
+      this.output += `[图形预览失败] ${String(e)}\n`;
+    }
   }
 
   // 菜单触发的 R 命令：显示在输出区 + 发送给 R
