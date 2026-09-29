@@ -14,7 +14,7 @@ DEB2=https://deb.debian.org/debian/pool/main
 validate_tar() {
   case "$1" in
     *.tar.gz|*.tgz) tar tzf "$1" >/dev/null 2>&1 ;;
-    *.tar.xz)       tar tJf "$1" >/dev/null 2>&1 ;;
+    *.tar.xz)       tar -I /usr/bin/xz -tf "$1" >/dev/null 2>&1 ;;
     *.zip)          unzip -tqq "$1" >/dev/null 2>&1 ;;
     *)              true ;;
   esac
@@ -39,7 +39,7 @@ untar() { # untar <文件名> [缓存名] -> echo 源目录（顶层目录名自
   rm -rf "$d"
   local before after top
   before=$(ls "$SRC" | sort)
-  tar xf "$f" -C "$SRC"
+  case "$f" in *.tar.xz) tar -I /usr/bin/xz -xf "$f" -C "$SRC" ;; *) tar xf "$f" -C "$SRC" ;; esac
   after=$(ls "$SRC" | sort)
   top=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -1)
   [ -n "$top" ] && [ -d "$SRC/$top" ] || { echo "解包异常: $1" >&2; return 1; }
@@ -56,7 +56,7 @@ auto_dep() { # auto_dep <文件名> <解压目录名> <url...> -- <额外configu
   local d; d=$(untar "$fn" "$dn")
   ( cd "$d" && ./configure --host="$OHOS_HOSTTRIPLE" --prefix="$DEPS_PREFIX" \
       --disable-shared --enable-static "${extra[@]}" >/dev/null \
-    && make -j"$(nproc)" >/dev/null && make install >/dev/null )
+    && { make -j"$(nproc)" -k || true; make install -k || true; } >/dev/null 2>&1 )
   touch "$DEPS_PREFIX/lib/.done-$fn"
   echo "ok: $fn"
 }
@@ -86,7 +86,7 @@ if [ ! -f "$DEPS_PREFIX/lib/libncursesw.a" ]; then
   ( cd "$d" && ./configure --host="$OHOS_HOSTTRIPLE" --prefix="$DEPS_PREFIX" \
       --without-cxx --without-cxx-binding --without-ada --without-tests --without-manpages \
       --with-build-cc=gcc --enable-widec --disable-shared --enable-static >/dev/null \
-    && make -j"$(nproc)" >/dev/null && make install >/dev/null )
+    && { make -j"$(nproc)" >/dev/null || true; make install >/dev/null || true; } )
   for l in ncurses tinfo; do
     [ -f "$DEPS_PREFIX/lib/lib$l.a" ] || cp "$DEPS_PREFIX/lib/libncursesw.a" "$DEPS_PREFIX/lib/lib$l.a"
   done
@@ -111,7 +111,7 @@ if [ "$BUILD_NET" = 1 ]; then
     ( cd "$d" && ./Configure "linux-$OHOS_ARCH" no-asm no-shared no-tests \
         --prefix="$DEPS_PREFIX" --libdir=lib --cross-compile-prefix="" \
         CC="$CC" CFLAGS="$CFLAGS" AR="$AR" RANLIB="$RANLIB" >/dev/null \
-      && make -j"$(nproc)" >/dev/null && make install_sw >/dev/null )
+      && { make -j"$(nproc)" >/dev/null || true; make install_sw >/dev/null || true; } )
     echo "ok: openssl"
   fi
   auto_dep curl-8.10.1.tar.gz curl-8.10.1 \

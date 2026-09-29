@@ -30,7 +30,9 @@ sed -i 's/ uninit\.o//' makefile.u
 gcc -O2 -o arithchk-host arithchk.c && ./arithchk-host > arith.h
 # arith.h 必须严格新于 arithchk.c（unzip 恢复的 mtime 同秒会导致 make 重跑目标机编译）
 touch -d '2000-01-01' arithchk.c sysdep1.h signal1.h f2c.h && touch arith.h
-make -f makefile.u CC="$CC" CFLAGS="$CFLAGS" AR="$AR" RANLIB="$RANLIB" libf2c.a
+# Use OHOS SDK ld.lld for cross-compile (host ld can't handle aarch64 objects)
+mkdir -p /tmp/ohos-ld-wrap && ln -sf "$OHOS_NDK/native/llvm/bin/ld.lld" /tmp/ohos-ld-wrap/ld
+PATH="/tmp/ohos-ld-wrap:$PATH" make -f makefile.u CC="$CC" CFLAGS="$CFLAGS" AR="$AR" RANLIB="$RANLIB" libf2c.a
 install -m644 f2c.h    "$DEPS_PREFIX/include/f2c.h"
 install -m644 libf2c.a "$DEPS_PREFIX/lib/libf2c.a"
 # 复数点积的 f2c 约定兼容层（遮蔽 OpenBLAS 的寄存器返回版本），链接顺序须在 -lopenblas 前
