@@ -276,3 +276,50 @@ Rcpp → rlang, vctrs, glue, cli, lifecycle
 | **RJDBC** | 数据库连接（JDBC） | ★★☆☆☆ | 依赖 rJava |
 | **tabulapdf** | PDF 表格提取（Java） | ★★☆☆☆ | 依赖 rJava |
 | **groovy** | Java Groovy 桥接 | ★★☆☆☆ | 依赖 rJava |
+---
+
+## OpenBLAS 加速（✅ 已完成）
+
+### 突破
+
+OpenBLAS 0.3.29 成功交叉编译到 OHOS (aarch64)，并替换 R 的 reference BLAS，获得 **5-7x 矩阵运算加速**。
+
+### 成果
+
+| 项目 | 详情 |
+|------|------|
+| OpenBLAS formula | ✅ 已写入 `Formula/o/openblas.rb`，`brew install -s openblas` 成功（37 秒） |
+| 共享库 | `libopenblas_armv8-r0.3.29.so`（2.3MB），ELF64 AArch64，1873 导出符号 |
+| R BLAS 替换 | ✅ `libRblas.so` → OpenBLAS 符号链接，R sessionInfo 确认 |
+| 计算正确性 | ✅ checksum 一致，det/solve/eigen/lm 全正确 |
+| R formula 更新 | ✅ `depends_on "openblas"` + `--with-blas` 在 OHOS 上也启用 |
+
+### Benchmark（容器内 aarch64 OHOS）
+
+| 矩阵大小 | 操作 | Reference BLAS | OpenBLAS | 加速比 |
+|----------|------|---------------|----------|--------|
+| 500×500 | matmul | 0.051s | 0.010s | 5.1x |
+| 1000×1000 | matmul | 0.394s | 0.066s | 6.0x |
+| 2000×2000 | matmul | 3.525s | 0.533s | 6.6x |
+| 3000×3000 | matmul | 12.645s | 1.769s | **7.1x** |
+| 3000×3000 | solve | 16.234s | 2.650s | 6.1x |
+| 3000×3000 | SVD | 64.016s | 17.000s | 3.8x |
+
+### 编译参数
+
+```bash
+make shared NOFORTRAN=1 NO_LAPACK=1 USE_THREAD=0 USE_OPENMP=0 \
+     TARGET=ARMV8 BINARY=64 CC=clang AR=llvm-ar RANLIB=llvm-ranlib HOSTCC=gcc
+```
+
+- `NOFORTRAN=1`：无需 Fortran 编译器（用 C wrapper）
+- `NO_LAPACK=1`：跳过 LAPACK（R 自带 LAPACK），同时跳过 netlib 依赖
+- `USE_THREAD=0`：单线程（避免 OHOS pthread 兼容问题）
+- `TARGET=ARMV8`：ARM64 汇编优化
+
+### 关键发现
+
+- `make libs` 只生成静态库 (.a)，`make shared` 才生成共享库 (.so)
+- `make shared` 依赖 `netlib` target（需要 lapack-netlib 目录），加 `NO_LAPACK=1` 跳过
+- OpenBLAS 的 Fortran 接口符号 (`dgemm_`, `sgemm_`) 与 R 的 BLAS 接口完全兼容
+- 替换方法：`ln -sf openblas.so libRblas.so`（R 的 libR.so 依赖 libRblas.so）

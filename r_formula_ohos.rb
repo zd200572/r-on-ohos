@@ -23,8 +23,9 @@ class R < Formula
   depends_on "xz"
   depends_on "zstd"
 
-  # openblas and tcl-tk are not available on OHOS
-  depends_on "openblas" unless OS.ohos?
+  # openblas is now available on OHOS (via openblas formula)
+  # tcl-tk is not yet available on OHOS
+  depends_on "openblas"
   depends_on "tcl-tk" unless OS.ohos?
 
   uses_from_macos "bzip2"
@@ -81,14 +82,15 @@ class R < Formula
       "FC=#{formula_opt_bin("gcc")}/gfortran",
     ]
 
-    # tcl-tk and openblas are not available on OHOS
+    # tcl-tk is not available on OHOS; openblas is now available
     unless OS.ohos?
       args << "--with-tcl-config=#{formula_opt_lib("tcl-tk")}/tclConfig.sh"
       args << "--with-tk-config=#{formula_opt_lib("tcl-tk")}/tkConfig.sh"
-      args << "--with-blas=-L#{formula_opt_lib("openblas")} -lopenblas"
     else
       args << "--without-tcltk"
     end
+    # Use OpenBLAS on all platforms (including OHOS)
+    args << "--with-blas=-L#{formula_opt_lib("openblas")} -lopenblas"
 
     if OS.mac?
       args << "--without-x"
